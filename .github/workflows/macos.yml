@@ -20,6 +20,8 @@ jobs:
           app="build/VST3Latency_artefacts/Release/VST3 Latency.app"
           exe="$app/Contents/MacOS/VST3 Latency"
           /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$app/Contents/Info.plist"
+          icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
+          test -f "$app/Contents/Resources/$icon" || test -f "$app/Contents/Resources/$icon.icns"
           lipo "$exe" -verify_arch arm64 x86_64
           codesign --force --sign - "$app"
           codesign --verify --strict "$app"

@@ -44,6 +44,11 @@ struct Row
     std::array<int, rates.size()> samples {};
 };
 
+}
+
+#include "Export.h"
+
+namespace {
 class Results final : public juce::Component,
                       private juce::TableListBoxModel,
                       private juce::Timer
@@ -69,6 +74,12 @@ public:
         details.setColour(juce::Label::textColourId, juce::Colours::white);
         addAndMakeVisible(status);
         addAndMakeVisible(details);
+        addAndMakeVisible(saveText);
+        addAndMakeVisible(saveExcel);
+        saveText.setEnabled(false);
+        saveExcel.setEnabled(false);
+        saveText.onClick = [this] { exportResults(false); };
+        saveExcel.onClick = [this] { exportResults(true); };
         startTimer(50);
     }
 
@@ -84,7 +95,10 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced(16);
-        status.setBounds(area.removeFromTop(30));
+        auto toolbar = area.removeFromTop(32);
+        saveExcel.setBounds(toolbar.removeFromRight(108).reduced(3));
+        saveText.setBounds(toolbar.removeFromRight(108).reduced(3));
+        status.setBounds(toolbar);
         details.setBounds(area.removeFromBottom(30));
         table.setBounds(area);
     }
@@ -139,6 +153,29 @@ private:
         sortColumn = column;
         sortAscending = ascending;
         refresh();
+    }
+
+    void exportResults(bool excel)
+    {
+        if (chooser != nullptr)
+            return;
+
+        const auto extension = excel ? ".xlsx" : ".txt";
+        const auto suggested = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                   .getChildFile(juce::String("VST3 Latency") + extension);
+        chooser = std::make_unique<juce::FileChooser>(utf8("Сохранить результаты"), suggested,
+                                                       juce::String("*") + extension);
+        chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                                 | juce::FileBrowserComponent::canSelectFiles
+                                 | juce::FileBrowserComponent::warnAboutOverwriting,
+                             [this, excel](const juce::FileChooser& dialog)
+        {
+            const auto destination = dialog.getResult();
+            if (destination != juce::File() && !saveResults(destination, rows, excel))
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    utf8("Ошибка экспорта"), utf8("Не удалось сохранить результаты."), {}, this);
+            chooser.reset();
+        });
     }
 
     void refresh()
@@ -228,6 +265,8 @@ private:
                                           : utf8("Сканирование завершено · строк: ")
                                                 + juce::String(getNumRows()),
                            juce::dontSendNotification);
+            saveText.setEnabled(!rows.empty());
+            saveExcel.setEnabled(!rows.empty());
             stopTimer();
             return;
         }
@@ -254,6 +293,8 @@ private:
 
     juce::TableListBox table;
     juce::Label status, details;
+    juce::TextButton saveText { utf8("Сохранить TXT") };
+    juce::TextButton saveExcel { utf8("Сохранить Excel") };
     std::vector<Row> rows;
     juce::StringArray paths;
     std::unique_ptr<juce::ChildProcess> worker;
@@ -261,6 +302,7 @@ private:
     double deadline = 0;
     int next = 0, sortColumn = 1;
     bool sortAscending = true, enumerated = false;
+    std::unique_ptr<juce::FileChooser> chooser;
 };
 
 class Window final : public juce::DocumentWindow
@@ -283,7 +325,7 @@ class App final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "VST3 Latency"; }
-    const juce::String getApplicationVersion() override { return "1.0.0"; }
+    const juce::String getApplicationVersion() override { return "1.0.2"; }
 
     bool moreThanOneInstanceAllowed() override { return true; }
 
