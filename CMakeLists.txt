@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(VST3Latency VERSION 1.0.0 LANGUAGES C CXX)
+project(VST3Latency VERSION 1.0.1 LANGUAGES C CXX)
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -10,7 +10,10 @@ FetchContent_MakeAvailable(JUCE)
 
 juce_add_gui_app(VST3Latency
     PRODUCT_NAME "VST3 Latency"
-    BUNDLE_ID com.vst3latency.desktop)
+    VERSION 1.0.1
+    BUNDLE_ID com.vst3latency.desktop
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "A VST3 plug-in may request audio input during scanning. VST3 Latency does not use the microphone to measure latency.")
 target_sources(VST3Latency PRIVATE Main.cpp)
 target_compile_features(VST3Latency PRIVATE cxx_std_17)
 target_compile_definitions(VST3Latency PRIVATE
