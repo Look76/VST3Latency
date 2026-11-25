@@ -310,7 +310,7 @@ private:
 
     void timerCallback() override
     {
-        if (!enumerated || idle)
+        if (!enumerated)
         {
             juce::VST3PluginFormat format;
             auto installed = format.searchPathsForPlugins(format.getDefaultLocationsToSearch(), true, false);
@@ -318,21 +318,11 @@ private:
             std::map<juce::String, juce::String> current;
             for (const auto& path : installed)
                 current.emplace(path, bundleSignature(juce::File(path)));
-            if (enumerated && current == signatures)
-                return;
-
             paths = std::move(installed);
             signatures = std::move(current);
-            next = 0;
-            rows.clear();
-            cache.deleteAllChildElements();
             loadCache();
             refresh();
             enumerated = true;
-            idle = false;
-            saveText.setEnabled(false);
-            saveExcel.setEnabled(false);
-            startTimer(50);
         }
         if (worker != nullptr)
         {
@@ -358,8 +348,7 @@ private:
                            juce::dontSendNotification);
             saveText.setEnabled(!rows.empty());
             saveExcel.setEnabled(!rows.empty());
-            idle = true;
-            startTimer(5000);
+            stopTimer();
             return;
         }
 
@@ -398,7 +387,7 @@ private:
     juce::File result;
     double deadline = 0;
     int next = 0, sortColumn = 1;
-    bool sortAscending = true, enumerated = false, idle = false;
+    bool sortAscending = true, enumerated = false;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
