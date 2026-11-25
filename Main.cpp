@@ -2,6 +2,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <algorithm>
 #include <array>
+#include <map>
 #include <vector>
 
 namespace {
@@ -22,6 +23,7 @@ int scanBundle(const juce::String& path, const juce::File& result)
         auto* row = output.createNewChildElement("plugin");
         row->setAttribute("name", type->name);
         row->setAttribute("vendor", type->manufacturerName);
+        row->setAttribute("category", type->category);
         for (const auto rate : rates)
         {
             juce::String error;
@@ -40,7 +42,7 @@ int scanBundle(const juce::String& path, const juce::File& result)
 
 struct Row
 {
-    juce::String name, vendor, path;
+    juce::String name, vendor, category, path;
     std::array<int, rates.size()> samples {};
 };
 
@@ -49,6 +51,23 @@ struct Row
 #include "Export.h"
 
 namespace {
+juce::String bundleSignature(const juce::File& bundle)
+{
+    juce::StringArray metadata;
+    const auto record = [&](const juce::File& file)
+    {
+        metadata.add(file.getRelativePathFrom(bundle) + "\t"
+                     + juce::String(file.getSize()) + "\t"
+                     + juce::String(file.getLastModificationTime().toMilliseconds()));
+    };
+    record(bundle);
+    for (const auto& entry : juce::RangedDirectoryIterator(
+             bundle, true, "*", juce::File::findFiles, juce::File::FollowSymlinks::noCycles))
+        record(entry.getFile());
+    metadata.sort(false);
+    return juce::String::toHexString(metadata.joinIntoString("\n").hashCode64());
+}
+
 class Results final : public juce::Component,
                       private juce::TableListBoxModel,
                       private juce::Timer
@@ -62,9 +81,10 @@ public:
         auto& header = table.getHeader();
         header.addColumn(utf8("Плагин"), 1, 235);
         header.addColumn(utf8("Производитель"), 2, 155);
+        header.addColumn(utf8("Категория"), 3, 145);
         for (size_t i = 0; i < rates.size(); ++i)
             header.addColumn(juce::String(rates[i] / 1000.0, 1).replaceCharacter('.', ',')
-                                 + utf8(" кГц"), static_cast<int>(i) + 3, 126);
+                                 + utf8(" кГц"), static_cast<int>(i) + 4, 126);
         header.setSortColumnId(1, true);
         addAndMakeVisible(table);
         status.setJustificationType(juce::Justification::centredLeft);
@@ -87,7 +107,12 @@ public:
     {
         stopTimer();
         if (worker != nullptr)
-            worker->kill();
+        {
+            if (worker->isRunning())
+                worker->kill();
+            else
+                recordResult();
+        }
         result.deleteFile();
         table.setModel(nullptr);
     }
@@ -125,11 +150,11 @@ private:
 
         const auto& item = rows[static_cast<size_t>(row)];
         juce::String value;
-        if (column <= 2)
-            value = column == 1 ? item.name : item.vendor;
+        if (column <= 3)
+            value = column == 1 ? item.name : column == 2 ? item.vendor : item.category;
         else
         {
-            const auto index = static_cast<size_t>(column - 3);
+            const auto index = static_cast<size_t>(column - 4);
             const auto samples = item.samples[index];
             value = samples < 0 ? utf8("—")
                                 : juce::String(1000.0 * samples / rates[index], 3)
@@ -138,7 +163,7 @@ private:
         }
         graphics.setColour(juce::Colours::white);
         graphics.drawText(value, 8, 0, width - 16, height,
-                          column <= 2 ? juce::Justification::centredLeft
+                          column <= 3 ? juce::Justification::centredLeft
                                       : juce::Justification::centredRight, true);
     }
 
@@ -187,9 +212,11 @@ private:
                 order = left.name.compareNatural(right.name);
             else if (sortColumn == 2)
                 order = left.vendor.compareNatural(right.vendor);
-            else if (sortColumn >= 3)
+            else if (sortColumn == 3)
+                order = left.category.compareNatural(right.category);
+            else if (sortColumn >= 4)
             {
-                const auto index = static_cast<size_t>(sortColumn - 3);
+                const auto index = static_cast<size_t>(sortColumn - 4);
                 const int a = left.samples[index], b = right.samples[index];
                 if ((a < 0) != (b < 0))
                     return b < 0;
@@ -201,25 +228,71 @@ private:
         table.repaint();
     }
 
-    void recordResult()
+    void appendRows(const juce::XmlElement& scan, const juce::String& path)
     {
-        const auto xml = worker->getExitCode() == 0 ? juce::parseXML(result) : nullptr;
-        bool any = false;
-        if (xml != nullptr && xml->hasTagName("scan"))
+        for (auto* plugin : scan.getChildIterator())
         {
-            for (auto* plugin : xml->getChildIterator())
+            Row row;
+            row.name = plugin->getStringAttribute("name");
+            row.vendor = plugin->getStringAttribute("vendor");
+            row.category = plugin->getStringAttribute("category");
+            row.path = path;
+            for (size_t i = 0; i < rates.size(); ++i)
+                row.samples[i] = plugin->getIntAttribute("hz" + juce::String(rates[i]), -1);
+            rows.push_back(std::move(row));
+        }
+    }
+
+    void writeCache()
+    {
+        if (auto directory = cacheFile.getParentDirectory().createDirectory(); directory.failed())
+        {
+            cacheWriteFailed = true;
+            return;
+        }
+        juce::TemporaryFile temporary(cacheFile);
+        cacheWriteFailed = !cache.writeTo(temporary.getFile())
+                           || !temporary.overwriteTargetFileWithTemporary();
+    }
+
+    void loadCache()
+    {
+        auto saved = juce::parseXML(cacheFile);
+        if (saved == nullptr || !saved->hasTagName("vst3LatencyCache1"))
+            return;
+
+        for (auto* entry : saved->getChildIterator())
+        {
+            const auto path = entry->getStringAttribute("path");
+            const auto signature = signatures.find(path);
+            if (signature != signatures.end() && entry->getNumChildElements() > 0
+                && entry->getStringAttribute("signature") == signature->second)
             {
-                Row row;
-                row.name = plugin->getStringAttribute("name");
-                row.vendor = plugin->getStringAttribute("vendor");
-                row.path = paths[next - 1];
-                for (size_t i = 0; i < rates.size(); ++i)
-                    row.samples[i] = plugin->getIntAttribute("hz" + juce::String(rates[i]), -1);
-                rows.push_back(std::move(row));
-                any = true;
+                appendRows(*entry, path);
+                cache.addChildElement(new juce::XmlElement(*entry));
+                paths.removeString(path);
             }
         }
-        if (!any)
+        writeCache();
+    }
+
+    void recordResult()
+    {
+        auto xml = worker->getExitCode() == 0 ? juce::parseXML(result) : nullptr;
+        const auto path = paths[next - 1];
+        if (xml != nullptr && xml->hasTagName("scan") && xml->getNumChildElements() > 0)
+        {
+            appendRows(*xml, path);
+            const auto signature = signatures.at(path);
+            if (bundleSignature(juce::File(path)) == signature)
+            {
+                xml->setAttribute("path", path);
+                xml->setAttribute("signature", signature);
+                cache.addChildElement(xml.release());
+                writeCache();
+            }
+        }
+        else
             recordFailure();
         result.deleteFile();
         refresh();
@@ -237,12 +310,29 @@ private:
 
     void timerCallback() override
     {
-        if (!enumerated)
+        if (!enumerated || idle)
         {
             juce::VST3PluginFormat format;
-            paths = format.searchPathsForPlugins(format.getDefaultLocationsToSearch(), true, false);
-            paths.removeDuplicates(false);
+            auto installed = format.searchPathsForPlugins(format.getDefaultLocationsToSearch(), true, false);
+            installed.removeDuplicates(false);
+            std::map<juce::String, juce::String> current;
+            for (const auto& path : installed)
+                current.emplace(path, bundleSignature(juce::File(path)));
+            if (enumerated && current == signatures)
+                return;
+
+            paths = std::move(installed);
+            signatures = std::move(current);
+            next = 0;
+            rows.clear();
+            cache.deleteAllChildElements();
+            loadCache();
+            refresh();
             enumerated = true;
+            idle = false;
+            saveText.setEnabled(false);
+            saveExcel.setEnabled(false);
+            startTimer(50);
         }
         if (worker != nullptr)
         {
@@ -261,13 +351,15 @@ private:
         }
         if (next >= paths.size())
         {
-            status.setText(paths.isEmpty() ? utf8("В стандартных папках VST3 плагины не найдены.")
+            status.setText(signatures.empty() ? utf8("В стандартных папках VST3 плагины не найдены.")
                                           : utf8("Сканирование завершено · строк: ")
-                                                + juce::String(getNumRows()),
+                                                + juce::String(getNumRows())
+                                                + (cacheWriteFailed ? utf8(" · кэш не сохранён") : juce::String()),
                            juce::dontSendNotification);
             saveText.setEnabled(!rows.empty());
             saveExcel.setEnabled(!rows.empty());
-            stopTimer();
+            idle = true;
+            startTimer(5000);
             return;
         }
 
@@ -297,11 +389,16 @@ private:
     juce::TextButton saveExcel { utf8("Сохранить Excel") };
     std::vector<Row> rows;
     juce::StringArray paths;
+    std::map<juce::String, juce::String> signatures;
+    juce::XmlElement cache { "vst3LatencyCache1" };
+    const juce::File cacheFile = juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                                    .getChildFile("Library/Application Support/VST3 Latency/scan-cache.xml");
+    bool cacheWriteFailed = false;
     std::unique_ptr<juce::ChildProcess> worker;
     juce::File result;
     double deadline = 0;
     int next = 0, sortColumn = 1;
-    bool sortAscending = true, enumerated = false;
+    bool sortAscending = true, enumerated = false, idle = false;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
@@ -313,8 +410,8 @@ public:
         setUsingNativeTitleBar(true);
         setContentOwned(new Results, false);
         setResizable(true, false);
-        setResizeLimits(930, 280, 2400, 1600);
-        centreWithSize(960, 560);
+        setResizeLimits(1090, 280, 2400, 1600);
+        centreWithSize(1120, 560);
         setVisible(true);
     }
 
@@ -325,7 +422,7 @@ class App final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "VST3 Latency"; }
-    const juce::String getApplicationVersion() override { return "1.0.2"; }
+    const juce::String getApplicationVersion() override { return "1.0.3"; }
 
     bool moreThanOneInstanceAllowed() override { return true; }
 
@@ -335,6 +432,18 @@ public:
         if (args.size() == 3 && args[0] == workerFlag)
         {
             setApplicationReturnValue(scanBundle(args[1], juce::File(args[2])));
+            quit();
+            return;
+        }
+        if (args.size() == 2 && args[0] == "--check-export")
+        {
+            const juce::File directory(args[1]);
+            const std::vector<Row> example {
+                { "Test & XML", "Example", "Fx|Delay", {}, { 441, 0, -1, 960 } }
+            };
+            const bool saved = saveResults(directory.getChildFile("results.txt"), example, false)
+                               && saveResults(directory.getChildFile("results.xlsx"), example, true);
+            setApplicationReturnValue(saved ? 0 : 1);
             quit();
             return;
         }

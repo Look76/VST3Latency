@@ -25,6 +25,10 @@ jobs:
           lipo "$exe" -verify_arch arm64 x86_64
           codesign --force --sign - "$app"
           codesign --verify --strict "$app"
+          test_dir=$(mktemp -d)
+          "$exe" --check-export "$test_dir"
+          grep -Fq 'Test & XML' "$test_dir/results.txt"
+          python3 -c 'import sys,zipfile,xml.etree.ElementTree as E; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; [E.fromstring(z.read(n)) for n in z.namelist()]; s=z.read("xl/worksheets/sheet1.xml"); assert b"Test &amp; XML" in s and b"Fx|Delay" in s and b"<v>441</v>" in s' "$test_dir/results.xlsx"
           ditto -c -k --keepParent "$app" VST3Latency-macOS.zip
       - uses: actions/upload-artifact@v6
         with:

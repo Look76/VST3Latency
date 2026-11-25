@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(VST3Latency VERSION 1.0.2 LANGUAGES C CXX)
+project(VST3Latency VERSION 1.0.3 LANGUAGES C CXX)
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -11,7 +11,7 @@ FetchContent_MakeAvailable(JUCE)
 juce_add_gui_app(VST3Latency
     PRODUCT_NAME "VST3 Latency"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/AppIcon.png"
-    VERSION 1.0.2
+    VERSION 1.0.3
     BUNDLE_ID com.vst3latency.desktop
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "A VST3 plug-in may request audio input during scanning. VST3 Latency does not use the microphone to measure latency.")

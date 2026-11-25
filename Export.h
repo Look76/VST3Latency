@@ -8,7 +8,7 @@ juce::String xmlPart(juce::String body)
 
 bool saveResults(const juce::File& file, const std::vector<Row>& rows, bool excel)
 {
-    juce::StringArray headers { utf8("Плагин"), utf8("Производитель") };
+    juce::StringArray headers { utf8("Плагин"), utf8("Производитель"), utf8("Категория") };
     for (const auto rate : rates)
     {
         const auto frequency = juce::String(rate / 1000.0, 1).replaceCharacter('.', ',');
@@ -35,7 +35,7 @@ bool saveResults(const juce::File& file, const std::vector<Row>& rows, bool exce
         for (int index = 0; index < values.size(); ++index)
         {
             auto* cell = row->createNewChildElement("c");
-            if (numeric && index >= 2)
+            if (numeric && index >= 3)
             {
                 if (values[index].isNotEmpty())
                     cell->createNewChildElement("v")->addTextElement(values[index]);
@@ -53,7 +53,7 @@ bool saveResults(const juce::File& file, const std::vector<Row>& rows, bool exce
     append(headers, false);
     for (const auto& row : rows)
     {
-        juce::StringArray values { row.name, row.vendor };
+        juce::StringArray values { row.name, row.vendor, row.category };
         for (size_t i = 0; i < rates.size(); ++i)
         {
             const int samples = row.samples[i];
