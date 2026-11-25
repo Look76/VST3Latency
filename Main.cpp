@@ -8,7 +8,7 @@
 namespace {
 juce::String utf8(const char* value) { return juce::String::fromUTF8(value); }
 
-constexpr std::array<int, 4> rates { 44100, 48000, 88200, 96000 };
+constexpr std::array<int, 2> rates { 44100, 88200 };
 constexpr int blockSize = 512;
 constexpr auto workerFlag = "--scan-bundle";
 
@@ -399,8 +399,8 @@ public:
         setUsingNativeTitleBar(true);
         setContentOwned(new Results, false);
         setResizable(true, false);
-        setResizeLimits(1090, 280, 2400, 1600);
-        centreWithSize(1120, 560);
+        setResizeLimits(830, 280, 2400, 1600);
+        centreWithSize(860, 560);
         setVisible(true);
     }
 
@@ -411,7 +411,7 @@ class App final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "VST3 Latency"; }
-    const juce::String getApplicationVersion() override { return "1.0.3"; }
+    const juce::String getApplicationVersion() override { return "1.0.4"; }
 
     bool moreThanOneInstanceAllowed() override { return true; }
 
@@ -428,7 +428,7 @@ public:
         {
             const juce::File directory(args[1]);
             const std::vector<Row> example {
-                { "Test & XML", "Example", "Fx|Delay", {}, { 441, 0, -1, 960 } }
+                { "Test & XML", "Example", "Fx|Delay", {}, { 441, 882 } }
             };
             const bool saved = saveResults(directory.getChildFile("results.txt"), example, false)
                                && saveResults(directory.getChildFile("results.xlsx"), example, true);
