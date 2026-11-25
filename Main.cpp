@@ -92,6 +92,8 @@ public:
                         juce::dontSendNotification);
         status.setColour(juce::Label::textColourId, juce::Colours::white);
         details.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(refreshButton);
+        refreshButton.onClick = [this] { beginScan(); };
         addAndMakeVisible(status);
         addAndMakeVisible(details);
         addAndMakeVisible(saveText);
@@ -100,7 +102,7 @@ public:
         saveExcel.setEnabled(false);
         saveText.onClick = [this] { exportResults(false); };
         saveExcel.onClick = [this] { exportResults(true); };
-        startTimer(50);
+        beginScan();
     }
 
     ~Results() override
@@ -121,6 +123,7 @@ public:
     {
         auto area = getLocalBounds().reduced(16);
         auto toolbar = area.removeFromTop(32);
+        refreshButton.setBounds(toolbar.removeFromLeft(102).reduced(3));
         saveExcel.setBounds(toolbar.removeFromRight(108).reduced(3));
         saveText.setBounds(toolbar.removeFromRight(108).reduced(3));
         status.setBounds(toolbar);
@@ -257,7 +260,10 @@ private:
 
     void loadCache()
     {
-        auto saved = juce::parseXML(cacheFile);
+        auto saved = cache.getNumChildElements() > 0
+                         ? std::make_unique<juce::XmlElement>(cache)
+                         : juce::parseXML(cacheFile);
+        cache.deleteAllChildElements();
         if (saved == nullptr || !saved->hasTagName("vst3LatencyCache1"))
             return;
 
@@ -308,9 +314,19 @@ private:
         rows.push_back(std::move(row));
     }
 
+    void beginScan()
+    {
+        refreshButton.setEnabled(false);
+        saveText.setEnabled(false);
+        saveExcel.setEnabled(false);
+        status.setText(utf8("Проверка установленных VST3…"), juce::dontSendNotification);
+        scanPending = true;
+        startTimer(50);
+    }
+
     void timerCallback() override
     {
-        if (!enumerated)
+        if (scanPending)
         {
             juce::VST3PluginFormat format;
             auto installed = format.searchPathsForPlugins(format.getDefaultLocationsToSearch(), true, false);
@@ -320,9 +336,11 @@ private:
                 current.emplace(path, bundleSignature(juce::File(path)));
             paths = std::move(installed);
             signatures = std::move(current);
+            next = 0;
+            rows.clear();
             loadCache();
             refresh();
-            enumerated = true;
+            scanPending = false;
         }
         if (worker != nullptr)
         {
@@ -349,6 +367,7 @@ private:
             saveText.setEnabled(!rows.empty());
             saveExcel.setEnabled(!rows.empty());
             stopTimer();
+            refreshButton.setEnabled(true);
             return;
         }
 
@@ -374,6 +393,7 @@ private:
 
     juce::TableListBox table;
     juce::Label status, details;
+    juce::TextButton refreshButton { utf8("Обновить") };
     juce::TextButton saveText { utf8("Сохранить TXT") };
     juce::TextButton saveExcel { utf8("Сохранить Excel") };
     std::vector<Row> rows;
@@ -387,7 +407,7 @@ private:
     juce::File result;
     double deadline = 0;
     int next = 0, sortColumn = 1;
-    bool sortAscending = true, enumerated = false;
+    bool sortAscending = true, scanPending = false;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
@@ -411,7 +431,7 @@ class App final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "VST3 Latency"; }
-    const juce::String getApplicationVersion() override { return "1.0.4"; }
+    const juce::String getApplicationVersion() override { return "1.0.5"; }
 
     bool moreThanOneInstanceAllowed() override { return true; }
 
