@@ -1,0 +1,30 @@
+name: Build macOS app
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build universal app
+        run: |
+          cmake -S . -B build -G Xcode '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+          cmake --build build --config Release --parallel 3
+      - name: Verify and package
+        run: |
+          app="build/VST3Latency_artefacts/Release/VST3 Latency.app"
+          exe="$app/Contents/MacOS/VST3 Latency"
+          lipo -verify_arch arm64 x86_64 "$exe"
+          codesign --force --sign - "$app"
+          codesign --verify --strict "$app"
+          ditto -c -k --keepParent "$app" VST3Latency-macOS.zip
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VST3Latency-macOS
+          path: VST3Latency-macOS.zip
+          if-no-files-found: error
